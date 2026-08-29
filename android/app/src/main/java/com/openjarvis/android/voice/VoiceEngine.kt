@@ -20,6 +20,7 @@ import com.openjarvis.android.voice.speech.SpeechProvider
 import com.openjarvis.android.voice.tts.AndroidTtsEngine
 import com.openjarvis.android.voice.tts.DeepgramTtsEngine
 import com.openjarvis.android.voice.tts.TtsEngine
+import com.openjarvis.android.voice.tts.TtsManager
 import com.openjarvis.android.voice.wakeword.WakeWordEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,8 +57,11 @@ class VoiceEngine(
 
     // Subcomponents
     val wakeWordEngine = WakeWordEngine(context)
-    val speechProvider: SpeechProvider = DeepgramSpeechProvider(context, secureVault)
-    val ttsEngine: TtsEngine = AndroidTtsEngine(context)
+    val deepgramSpeechProvider = DeepgramSpeechProvider(context, secureVault)
+    val androidSpeechProvider = AndroidSpeechProvider(context)
+    val speechProvider: SpeechProvider
+        get() = if (deepgramSpeechProvider.isAvailable()) deepgramSpeechProvider else androidSpeechProvider
+    val ttsEngine: TtsEngine = TtsManager(context, secureVault, configManager)
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -94,13 +98,19 @@ class VoiceEngine(
             return
         }
 
-        if (_voiceState.value == VoiceState.IDLE || _voiceState.value == VoiceState.STOPPED) {
+        if (!wakeWordEngine.isMicrophoneAvailable()) {
+            JarvisLogger.w("VoiceEngine", "MICROPHONE_UNAVAILABLE: RECORD_AUDIO permission not granted.")
+            updateState(VoiceState.ERROR)
+            return
+        }
+
+        if (_voiceState.value == VoiceState.IDLE || _voiceState.value == VoiceState.STOPPED || _voiceState.value == VoiceState.ERROR) {
             updateState(VoiceState.LISTENING_FOR_WAKE_WORD)
             wakeWordEngine.setWakeWord(config.wakeWordPhrase)
             wakeWordEngine.setSensitivity(config.wakeWordSensitivity)
             wakeWordEngine.setCooldownMs((config.wakeWordCooldownSec * 1000).toLong())
             wakeWordEngine.start()
-            JarvisLogger.i("VoiceEngine", "Background voice listening started for '${config.wakeWordPhrase}'")
+            JarvisLogger.i("VoiceEngine", "WAKE_WORD_SERVICE_ACTIVE: Background voice listening started for '${config.wakeWordPhrase}'")
         }
     }
 
@@ -109,18 +119,33 @@ class VoiceEngine(
      */
     fun stopBackgroundListening() {
         wakeWordEngine.stop()
-        speechProvider.stopListening()
+        deepgramSpeechProvider.stopListening()
+        androidSpeechProvider.stopListening()
         ttsEngine.stop()
         abandonAudioFocus()
         updateState(VoiceState.STOPPED)
-        JarvisLogger.i("VoiceEngine", "Background voice listening stopped.")
+        JarvisLogger.i("VoiceEngine", "JARVIS_SERVICE_STOP: Background voice listening stopped.")
+    }
+
+    /**
+     * Release all native and cloud resources on destruction.
+     */
+    fun destroy() {
+        cancelCommandTimeout()
+        wakeWordEngine.release()
+        deepgramSpeechProvider.release()
+        androidSpeechProvider.release()
+        ttsEngine.release()
+        abandonAudioFocus()
+        updateState(VoiceState.IDLE)
+        JarvisLogger.i("VoiceEngine", "VoiceEngine destroyed and all audio resources released.")
     }
 
     /**
      * Triggered when "Hey JARVIS" is detected.
      */
     private fun onWakeWordTriggered(phrase: String) {
-        JarvisLogger.i("VoiceEngine", "Wake word triggered: '$phrase'")
+        JarvisLogger.i("VoiceEngine", "WAKE_WORD_DETECTED: Wake word triggered: '$phrase'")
         updateState(VoiceState.WAKE_WORD_DETECTED)
 
         requestAudioFocus()
@@ -130,6 +155,7 @@ class VoiceEngine(
             text = "Oui ?",
             onStart = {
                 wakeWordEngine.pause()
+                updateState(VoiceState.SPEAKING)
             },
             onDone = {
                 startListeningForCommand()
@@ -141,9 +167,9 @@ class VoiceEngine(
     }
 
     /**
-     * Transition to LISTENING_COMMAND and start SpeechRecognizer.
+     * Transition to LISTENING_COMMAND and start Speech-To-Text Recognition.
      */
-    fun startListeningForCommand() {
+    fun startListeningForCommand(locale: String = "fr-FR") {
         wakeWordEngine.pause()
         updateState(VoiceState.LISTENING_COMMAND)
         _currentTranscript.value = ""
@@ -153,8 +179,13 @@ class VoiceEngine(
         val timeoutSec = configManager.config.value.commandTimeoutSec
         startCommandTimeout(timeoutSec)
 
-        speechProvider.startListening(
-            language = "fr-FR",
+        val primaryProvider = speechProvider
+        JarvisLogger.i("VoiceEngine", "Starting command listening with provider: ${primaryProvider.name}")
+
+        var hasExecutedCommand = false
+
+        primaryProvider.startListening(
+            language = locale,
             onPartialResult = { partial ->
                 _currentTranscript.value = partial
                 resetCommandTimeout(timeoutSec)
@@ -166,6 +197,12 @@ class VoiceEngine(
             },
             onFinalResult = { finalTranscript ->
                 cancelCommandTimeout()
+                if (hasExecutedCommand) {
+                    JarvisLogger.d("VoiceEngine", "Duplicate command execution prevented.")
+                    return@startListening
+                }
+                hasExecutedCommand = true
+
                 if (finalTranscript.isNotBlank()) {
                     if (isInterruptionPhrase(finalTranscript)) {
                         cancelCurrentInteraction("Interruption vocale demandée.")
@@ -176,10 +213,52 @@ class VoiceEngine(
                     returnToWakeWordListening()
                 }
             },
-            onError = { _, errorMsg ->
-                JarvisLogger.w("VoiceEngine", "Command recognition error: $errorMsg")
-                cancelCommandTimeout()
-                returnToWakeWordListening()
+            onError = { errorCode, errorMsg ->
+                JarvisLogger.w("VoiceEngine", "Primary STT (${primaryProvider.name}) error: $errorMsg (code=$errorCode)")
+
+                // Explicit Fallback: If Deepgram fails and Android SpeechRecognizer is available, failover seamlessly
+                if (primaryProvider is DeepgramSpeechProvider && androidSpeechProvider.isAvailable()) {
+                    JarvisLogger.i("VoiceEngine", "ANDROID_STT_FALLBACK: Deepgram failed ($errorMsg) -> Engaging Android SpeechRecognizer fallback...")
+                    androidSpeechProvider.startListening(
+                        language = locale,
+                        onPartialResult = { partial ->
+                            _currentTranscript.value = partial
+                            resetCommandTimeout(timeoutSec)
+                            if (isInterruptionPhrase(partial)) {
+                                cancelCurrentInteraction("Interruption vocale demandée.")
+                            }
+                        },
+                        onFinalResult = { finalTranscript ->
+                            cancelCommandTimeout()
+                            if (hasExecutedCommand) {
+                                JarvisLogger.d("VoiceEngine", "Duplicate command execution prevented in fallback.")
+                                return@startListening
+                            }
+                            hasExecutedCommand = true
+
+                            if (finalTranscript.isNotBlank()) {
+                                if (isInterruptionPhrase(finalTranscript)) {
+                                    cancelCurrentInteraction("Interruption vocale demandée.")
+                                } else {
+                                    processUserVoiceCommand(finalTranscript)
+                                }
+                            } else {
+                                returnToWakeWordListening()
+                            }
+                        },
+                        onError = { fbCode, fbErrorMsg ->
+                            JarvisLogger.w("VoiceEngine", "ANDROID_STT_ERROR: Fallback STT also failed: $fbErrorMsg (code=$fbCode)")
+                            cancelCommandTimeout()
+                            returnToWakeWordListening()
+                        },
+                        onRmsDbChanged = { rmsDb ->
+                            _audioLevel.value = rmsDb
+                        }
+                    )
+                } else {
+                    cancelCommandTimeout()
+                    returnToWakeWordListening()
+                }
             },
             onRmsDbChanged = { rmsDb ->
                 _audioLevel.value = rmsDb
@@ -203,17 +282,24 @@ class VoiceEngine(
             // Vocalize response
             val response = coreBridge.lastResponse.value
             if (response.isNotBlank()) {
-                updateState(VoiceState.SPEAKING)
                 ttsEngine.speak(
                     text = response,
                     onStart = {
+                        // Real TTS_STARTED: Transition to SPEAKING only when audio playback physically begins
                         wakeWordEngine.pause()
+                        updateState(VoiceState.SPEAKING)
                     },
                     onDone = {
+                        // Real TTS_FINISHED: Transition back to idle/wake-word immediately
                         returnToWakeWordListening()
                     },
-                    onError = {
-                        returnToWakeWordListening()
+                    onError = { errorMsg ->
+                        JarvisLogger.w("VoiceEngine", "TTS playback failed: $errorMsg")
+                        updateState(VoiceState.ERROR)
+                        scope.launch {
+                            delay(2000L)
+                            returnToWakeWordListening()
+                        }
                     }
                 )
             } else {
@@ -241,9 +327,18 @@ class VoiceEngine(
         cancelCommandTimeout()
         speechProvider.stopListening()
         ttsEngine.stop()
-        ttsEngine.speak("À vos ordres.") {
-            returnToWakeWordListening()
-        }
+        ttsEngine.speak(
+            text = "À vos ordres.",
+            onStart = {
+                updateState(VoiceState.SPEAKING)
+            },
+            onDone = {
+                returnToWakeWordListening()
+            },
+            onError = {
+                returnToWakeWordListening()
+            }
+        )
     }
 
     /**
@@ -301,6 +396,26 @@ class VoiceEngine(
     private fun requestAudioFocus() {
         if (audioManager == null) return
         try {
+            val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+                JarvisLogger.d("VoiceEngine", "AudioFocus changed: $focusChange")
+                when (focusChange) {
+                    AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                        JarvisLogger.i("VoiceEngine", "AudioFocus lost (transient or permanent). Pausing voice capture.")
+                        wakeWordEngine.pause()
+                        if (_voiceState.value == VoiceState.LISTENING_COMMAND) {
+                            deepgramSpeechProvider.stopListening()
+                            androidSpeechProvider.stopListening()
+                        }
+                    }
+                    AudioManager.AUDIOFOCUS_GAIN -> {
+                        JarvisLogger.i("VoiceEngine", "AudioFocus regained. Resuming voice listening if configured.")
+                        if (configManager.config.value.wakeWordEnabled) {
+                            wakeWordEngine.resume()
+                        }
+                    }
+                }
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val playbackAttributes = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
@@ -308,15 +423,13 @@ class VoiceEngine(
                     .build()
                 audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                     .setAudioAttributes(playbackAttributes)
-                    .setOnAudioFocusChangeListener { focusChange ->
-                        JarvisLogger.d("VoiceEngine", "AudioFocus changed: $focusChange")
-                    }
+                    .setOnAudioFocusChangeListener(focusChangeListener)
                     .build()
                 audioManager.requestAudioFocus(audioFocusRequest!!)
             } else {
                 @Suppress("DEPRECATION")
                 audioManager.requestAudioFocus(
-                    null,
+                    focusChangeListener,
                     AudioManager.STREAM_VOICE_CALL,
                     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
                 )

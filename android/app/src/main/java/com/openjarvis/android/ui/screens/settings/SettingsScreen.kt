@@ -120,12 +120,16 @@ fun SettingsScreen() {
                         }
                         Switch(
                             checked = config.wakeWordEnabled,
-                            onCheckedChange = {
-                                configManager.updateConfig(config.copy(wakeWordEnabled = it))
-                                if (it) {
+                            onCheckedChange = { enabled ->
+                                configManager.updateConfig(config.copy(wakeWordEnabled = enabled))
+                                if (enabled) {
                                     JarvisApplication.instance.voiceEngine.startBackgroundListening()
+                                    if (config.backgroundListening) {
+                                        com.openjarvis.android.services.VoiceAssistantForegroundService.start(context)
+                                    }
                                 } else {
                                     JarvisApplication.instance.voiceEngine.stopBackgroundListening()
+                                    com.openjarvis.android.services.VoiceAssistantForegroundService.stop(context)
                                 }
                             },
                             colors = SwitchDefaults.colors(

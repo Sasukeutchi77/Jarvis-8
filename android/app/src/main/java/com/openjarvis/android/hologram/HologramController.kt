@@ -167,7 +167,10 @@ class HologramController(
                     onConversationIdle()
                 }
             }
-            VoiceState.STOPPED, VoiceState.ERROR -> {
+            VoiceState.ERROR -> {
+                onErrorOccurred("Erreur vocale / IA")
+            }
+            VoiceState.STOPPED -> {
                 dismissHologram()
             }
             VoiceState.PAUSED -> {
@@ -224,7 +227,7 @@ class HologramController(
     }
 
     /**
-     * Triggered when TTS begins speaking the answer.
+     * Triggered when TTS begins speaking the answer (TTS_STARTED).
      */
     fun onSpeakingStarted(spokenText: String) {
         transitionToState(HologramState.SPEAKING)
@@ -237,7 +240,7 @@ class HologramController(
     }
 
     /**
-     * Triggered when dialogue turn completes and assistant returns to standby.
+     * Triggered when speech playback completes (TTS_FINISHED) or dialogue turn completes.
      */
     fun onConversationIdle() {
         ttsAudioAnalyzer.stopSpeechTracking()
@@ -250,6 +253,27 @@ class HologramController(
         // Auto-dismiss countdown
         if (config.autoHide) {
             scheduleAutoDismiss(config.autoHideDelaySec)
+        }
+    }
+
+    /**
+     * Triggered upon STT_ERROR, AI_ERROR, or TTS_ERROR.
+     * Displays a short tactical warning alert and auto-reverts to IDLE after 2 seconds.
+     */
+    fun onErrorOccurred(errorMessage: String = "Erreur système") {
+        ttsAudioAnalyzer.stopSpeechTracking()
+        transitionToState(HologramState.ERROR)
+        updateOverlayDisplay(
+            state = HologramState.ERROR,
+            statusText = "ERREUR SYSTÈME",
+            transcript = errorMessage
+        )
+
+        scope.launch {
+            delay(2000L)
+            if (_hologramState.value == HologramState.ERROR) {
+                onConversationIdle()
+            }
         }
     }
 
@@ -290,6 +314,23 @@ class HologramController(
                 visualizer.reset()
             }
         }
+    }
+
+    /**
+     * Cleanly release and destroy all background jobs and hardware resources.
+     */
+    fun destroy() {
+        cancelAutoDismissTimer()
+        voiceStateObserverJob?.cancel()
+        voiceStateObserverJob = null
+        ttsAudioAnalyzer.stopSpeechTracking()
+        toneGenerator?.release()
+        toneGenerator = null
+        vibrator = null
+        overlayService?.dismissOverlay()
+        overlayService = null
+        _hologramState.value = HologramState.HIDDEN
+        visualizer.reset()
     }
 
     private fun transitionToState(newState: HologramState) {
@@ -367,7 +408,9 @@ class HologramController(
             HologramState.LISTENING -> "ÉCOUTE DE LA COMMANDE..."
             HologramState.THINKING -> "RAISONNEMENT JARVIS..."
             HologramState.SPEAKING -> "J.A.R.V.I.S."
+            HologramState.ERROR -> "ERREUR SYSTÈME"
             HologramState.DISMISSING -> "VEILLE..."
+            else -> "J.A.R.V.I.S."
         }
     }
 

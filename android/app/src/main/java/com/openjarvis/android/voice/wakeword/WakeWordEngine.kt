@@ -378,6 +378,13 @@ class WakeWordEngine(private val context: Context) {
     }
 
     /**
+     * Release alias for complete lifecycle cleanup.
+     */
+    fun release() {
+        stop()
+    }
+
+    /**
      * Handle true acoustic match from WakeWordDetector.
      */
     private fun handleWakeWordDetection(result: DetectionResult) {

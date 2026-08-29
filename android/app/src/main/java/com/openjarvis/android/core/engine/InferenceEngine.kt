@@ -8,7 +8,8 @@ enum class ProviderType {
     LAN_OLLAMA,
     CLOUD_GEMINI,
     CLOUD_OPENAI,
-    CLOUD_ANTHROPIC
+    CLOUD_ANTHROPIC,
+    CLOUD_OPENROUTER
 }
 
 data class EngineMessage(

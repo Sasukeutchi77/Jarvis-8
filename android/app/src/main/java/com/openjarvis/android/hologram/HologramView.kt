@@ -272,6 +272,16 @@ class HologramView @JvmOverloads constructor(
         ringRotation3 += deltaTime * 18f * speedMult
         pulsePhase += deltaTime * 3.5f
 
+        // Active visual theme (switches to TACTICAL_CRIMSON on system/speech error)
+        val activeTheme = if (state == HologramState.ERROR) HologramThemeColor.TACTICAL_CRIMSON else theme
+        ringPaint1.color = activeTheme.secondaryInt
+        ringPaint2.color = activeTheme.primaryInt
+        ringPaint3.color = activeTheme.secondaryInt
+        particlePaint.color = activeTheme.accentInt
+        waveformPaint.color = activeTheme.secondaryInt
+        textPaint.color = activeTheme.accentInt
+        reticlePaint.color = activeTheme.secondaryInt
+
         // Base Radius & Scaling
         val baseRadius = min(width, height) * 0.28f * transitionProgress
         val coreScale = visualizer.calculateCoreScale()
@@ -282,8 +292,8 @@ class HologramView @JvmOverloads constructor(
             glowPaint.shader = RadialGradient(
                 cx, cy, glowRadius,
                 intArrayOf(
-                    theme.secondaryInt and 0x00FFFFFF or (0x55000000),
-                    theme.primaryInt and 0x00FFFFFF or (0x22000000),
+                    activeTheme.secondaryInt and 0x00FFFFFF or (0x55000000),
+                    activeTheme.primaryInt and 0x00FFFFFF or (0x22000000),
                     0x00000000
                 ),
                 floatArrayOf(0.0f, 0.6f, 1.0f),
@@ -296,7 +306,7 @@ class HologramView @JvmOverloads constructor(
         val innerCoreRadius = baseRadius * 0.45f * coreScale
         corePaint.shader = RadialGradient(
             cx, cy, innerCoreRadius,
-            intArrayOf(theme.accentInt, theme.secondaryInt, theme.primaryInt),
+            intArrayOf(activeTheme.accentInt, activeTheme.secondaryInt, activeTheme.primaryInt),
             floatArrayOf(0.0f, 0.5f, 1.0f),
             Shader.TileMode.CLAMP
         )

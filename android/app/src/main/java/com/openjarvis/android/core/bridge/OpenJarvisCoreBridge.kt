@@ -7,7 +7,9 @@ import com.openjarvis.android.config.ExecutionMode
 import com.openjarvis.android.core.engine.EngineMessage
 import com.openjarvis.android.core.engine.InferenceEngine
 import com.openjarvis.android.core.engine.StreamChunk
+import com.openjarvis.android.core.engine.cloud.AnthropicCloudEngine
 import com.openjarvis.android.core.engine.cloud.GeminiCloudEngine
+import com.openjarvis.android.core.engine.cloud.OpenAICloudEngine
 import com.openjarvis.android.core.engine.lan.LanOpenJarvisEngine
 import com.openjarvis.android.core.events.AgentState
 import com.openjarvis.android.core.events.JarvisEvent
@@ -56,6 +58,8 @@ class OpenJarvisCoreBridge(
 
     // Engines
     private val geminiEngine = GeminiCloudEngine(secureVault)
+    private val openAiEngine = OpenAICloudEngine(secureVault)
+    private val anthropicEngine = AnthropicCloudEngine(secureVault)
     private val lanEngine = LanOpenJarvisEngine(configManager)
 
     // Conversation history kept in memory for contextual turns
@@ -242,13 +246,31 @@ class OpenJarvisCoreBridge(
                     emptyList()
                 }
 
-                // 6. Select appropriate Engine based on ExecutionMode & Availability
-                val executionMode = configManager.config.value.executionMode
+                // 6. Select appropriate Engine based on ExecutionMode, Configured Model & Provider Availability
+                val config = configManager.config.value
+                val executionMode = config.executionMode
+                val configuredModel = config.defaultCloudModel.lowercase()
+
+                val preferredCloudEngine: InferenceEngine = when {
+                    configuredModel.contains("gpt") || configuredModel.contains("openai") -> {
+                        if (openAiEngine.isAvailable()) openAiEngine else if (geminiEngine.isAvailable()) geminiEngine else anthropicEngine
+                    }
+                    configuredModel.contains("claude") || configuredModel.contains("anthropic") -> {
+                        if (anthropicEngine.isAvailable()) anthropicEngine else if (geminiEngine.isAvailable()) geminiEngine else openAiEngine
+                    }
+                    else -> {
+                        if (geminiEngine.isAvailable()) geminiEngine else if (openAiEngine.isAvailable()) openAiEngine else anthropicEngine
+                    }
+                }
+
                 val engine: InferenceEngine = when (executionMode) {
                     ExecutionMode.LOCAL_ONLY -> lanEngine
-                    ExecutionMode.CLOUD_ONLY -> geminiEngine
-                    ExecutionMode.HYBRID, ExecutionMode.LAN_ONLY -> {
-                        if (geminiEngine.isAvailable()) geminiEngine else lanEngine
+                    ExecutionMode.CLOUD_ONLY -> preferredCloudEngine
+                    ExecutionMode.HYBRID -> {
+                        if (preferredCloudEngine.isAvailable()) preferredCloudEngine else lanEngine
+                    }
+                    ExecutionMode.LAN_ONLY -> {
+                        if (lanEngine.isAvailable()) lanEngine else preferredCloudEngine
                     }
                 }
 

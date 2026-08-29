@@ -160,7 +160,30 @@ object VoiceDiagnostics {
             )
         )
 
-        // 8. Battery Optimization Exclusion
+        // 8. AI Inference Providers (Gemini, OpenAI, Anthropic, LAN Ollama)
+        val geminiKey = JarvisApplication.instance.secureVault.getSecret(SecureVault.KEY_GEMINI)
+        val openAiKey = JarvisApplication.instance.secureVault.getSecret(SecureVault.KEY_OPENAI)
+        val anthropicKey = JarvisApplication.instance.secureVault.getSecret(SecureVault.KEY_ANTHROPIC)
+        val lanUrl = JarvisApplication.instance.configManager.getLanServerUrl()
+        val hasAnyAi = geminiKey.isNotBlank() || openAiKey.isNotBlank() || anthropicKey.isNotBlank() || lanUrl.isNotBlank()
+
+        val aiDetails = buildList {
+            if (geminiKey.isNotBlank()) add("Gemini: configuré")
+            if (openAiKey.isNotBlank()) add("OpenAI: configuré")
+            if (anthropicKey.isNotBlank()) add("Anthropic: configuré")
+            if (lanUrl.isNotBlank()) add("LAN/Ollama: $lanUrl")
+        }.joinToString(" | ").ifEmpty { "Aucun moteur configuré (ajoutez une clé dans le coffre sécurisé)." }
+
+        items.add(
+            DiagnosticItem(
+                title = "Moteurs d'Inférence IA (Cerveau JARVIS)",
+                isOk = hasAnyAi,
+                details = aiDetails,
+                recommendation = if (!hasAnyAi) "Configurez au moins une clé API (Gemini, OpenAI ou Anthropic) ou une URL LAN Ollama." else null
+            )
+        )
+
+        // 9. Battery Optimization Exclusion
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         val isIgnoringBattery = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             powerManager?.isIgnoringBatteryOptimizations(context.packageName) ?: false

@@ -83,14 +83,14 @@ class AudioCapture(
         }
 
         if (!hasRecordPermission()) {
-            JarvisLogger.e("AudioCapture", "RECORD_AUDIO permission not granted.")
+            JarvisLogger.w("AudioCapture", "MICROPHONE_UNAVAILABLE: RECORD_AUDIO permission not granted.")
             onErrorListener?.invoke("Permission RECORD_AUDIO non accordée.")
             return false
         }
 
         val minBufSize = AudioRecord.getMinBufferSize(sampleRate, CHANNEL_CONFIG, AUDIO_FORMAT)
         if (minBufSize <= 0) {
-            val error = "Calcul impossible de la taille du buffer audio: $minBufSize"
+            val error = "MICROPHONE_UNAVAILABLE: Calcul impossible de la taille du buffer audio: $minBufSize"
             JarvisLogger.e("AudioCapture", error)
             onErrorListener?.invoke(error)
             return false
@@ -107,8 +107,8 @@ class AudioCapture(
             )
 
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                val error = "AudioRecord non initialisé (matériel audio indisponible ou occupé)"
-                JarvisLogger.e("AudioCapture", error)
+                val error = "MICROPHONE_UNAVAILABLE: AudioRecord non initialisé (matériel audio indisponible, appel en cours ou occupé)"
+                JarvisLogger.w("AudioCapture", error)
                 onErrorListener?.invoke(error)
                 releaseHardware()
                 return false

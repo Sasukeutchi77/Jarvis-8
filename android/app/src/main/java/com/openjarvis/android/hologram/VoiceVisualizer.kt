@@ -130,6 +130,7 @@ class VoiceVisualizer {
             HologramState.AUTOMATION -> 2.6f
             HologramState.SPEAKING -> 1.8f + (_smoothedAmplitude * 1.5f)
             HologramState.LISTENING -> 1.2f + (_smoothedAmplitude * 1.8f)
+            HologramState.ERROR -> 1.0f
             HologramState.APPEARING -> 2.0f
             HologramState.IDLE -> 0.6f
             HologramState.DISMISSING -> 0.4f

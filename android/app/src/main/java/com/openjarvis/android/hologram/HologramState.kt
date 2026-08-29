@@ -48,6 +48,11 @@ enum class HologramState {
     SPEAKING,
 
     /**
+     * System, Speech, AI or TTS error alert state: tactical warning pulse before auto-reverting.
+     */
+    ERROR,
+
+    /**
      * Exit transition: collapse toward center, fading particles, returning to HIDDEN.
      */
     DISMISSING;
