@@ -51,20 +51,32 @@ const app = express();
 const PORT = 3000;
 
 // --- CORS & Security Headers Middleware ---
+// Only trusted origins may call the server: local dev, the desktop/mobile shells,
+// plus any extra origins listed in ALLOWED_ORIGINS (comma-separated).
+const EXTRA_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',').map((o) => o.trim()).filter(Boolean);
+function isAllowedOrigin(origin: string): boolean {
+  if (EXTRA_ORIGINS.includes(origin)) return true;
+  return /^(https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?|tauri:\/\/localhost|https?:\/\/tauri\.localhost|capacitor:\/\/localhost)$/.test(origin);
+}
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
+    if (!isAllowedOrigin(origin)) {
+      return res.status(403).json({ error: 'Forbidden', message: 'Origine non autorisée.' });
+    }
     res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
   res.setHeader(
     'Access-Control-Allow-Headers',
     'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-API-Key, x-api-key, X-Jarvis-Token, X-Android-App, X-Client-Version'
   );
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
 
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
@@ -111,6 +123,26 @@ function verifyJarvisApiKey(providedKey: string | undefined | null): boolean {
 
   return crypto.timingSafeEqual(tokenBuffer, masterBuffer);
 }
+
+// Global auth guard for every /api and /v1 route.
+// - With OPENJARVIS_API_KEY set: a valid key is required (Bearer / X-API-Key / X-Jarvis-Token).
+// - Without it: only requests from this machine (loopback) are accepted.
+const PUBLIC_PATHS = new Set(['/health', '/api/auth/status', '/api/android/verify-connection']);
+function isLoopback(req: express.Request): boolean {
+  const ip = req.socket.remoteAddress || '';
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+app.use((req, res, next) => {
+  const p = req.path;
+  if (!(p.startsWith('/api/') || p.startsWith('/v1/')) || PUBLIC_PATHS.has(p)) return next();
+  const provided = (req.headers.authorization || req.headers['x-api-key'] || req.headers['x-jarvis-token']) as string | undefined;
+  if (process.env.OPENJARVIS_API_KEY) {
+    if (verifyJarvisApiKey(provided)) return next();
+  } else if (isLoopback(req) || verifyJarvisApiKey(provided)) {
+    return next();
+  }
+  return res.status(401).json({ error: 'Unauthorized', message: 'Clé OPENJARVIS manquante ou invalide.' });
+});
 
 // Authentication & Handshake status endpoint (Never leaks secret value)
 app.get('/api/auth/status', (req, res) => {
