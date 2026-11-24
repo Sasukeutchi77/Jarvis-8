@@ -46,6 +46,7 @@ class SecureVault(context: Context) {
 
     companion object {
         const val KEY_OPENAI = "api_key_openai"
+        const val KEY_OPENJARVIS = "api_key_openjarvis"
         const val KEY_ANTHROPIC = "api_key_anthropic"
         const val KEY_GEMINI = "api_key_gemini"
         const val KEY_DEEPGRAM = "api_key_deepgram"
@@ -56,3 +57,4 @@ class SecureVault(context: Context) {
         const val KEY_SLACK_APP = "api_key_slack_app"
     }
 }
+

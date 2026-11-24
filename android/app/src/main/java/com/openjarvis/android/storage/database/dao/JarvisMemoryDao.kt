@@ -55,7 +55,7 @@ interface JarvisMemoryDao {
 
     @Query("""
         SELECT m.* FROM jarvis_memories m
-        JOIN jarvis_memories_fts fts ON m.id = fts.rowid
+        JOIN jarvis_memories_fts fts ON m.id = fts.id
         WHERE jarvis_memories_fts MATCH :searchQuery AND m.enabled = 1
         ORDER BY m.importance DESC, m.updatedAt DESC
         LIMIT :limit
@@ -71,3 +71,4 @@ interface JarvisMemoryDao {
     """)
     suspend fun searchLike(query: String, limit: Int = 10): List<MemoryEntity>
 }
+

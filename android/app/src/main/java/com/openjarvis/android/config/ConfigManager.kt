@@ -36,6 +36,8 @@ class ConfigManager(context: Context) {
         )
     }
 
+    fun getLanServerUrl(): String = _config.value.lanServerUrl
+
     fun updateConfig(newConfig: JarvisConfig) {
         prefs.edit()
             .putString("execution_mode", newConfig.executionMode.name)
@@ -58,3 +60,4 @@ class ConfigManager(context: Context) {
         JarvisLogger.i("ConfigManager", "Configuration updated: mode=${newConfig.executionMode}")
     }
 }
+

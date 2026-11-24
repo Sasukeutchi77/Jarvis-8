@@ -76,15 +76,32 @@ L'application est structurée en 3 couches complémentaires :
 
 ---
 
+## 2 bis. Nouveautés : mémoire durable, appairage, sauvegarde, briefing
+
+- **Données persistantes (SQLite)** : mémoire, routines, macros vocales, automatisations, rappels, domotique et réglages sont restaurés au redémarrage (`data/openjarvis.sqlite`, droits `600`, chemin modifiable via `OPENJARVIS_DB`). Nécessite Node ≥ 22.5 (module `node:sqlite` intégré) ; sinon le serveur fonctionne en mémoire et l'indique.
+- **Appairage d'un téléphone** : *Paramètres → Téléphones associés* affiche un code à usage unique (et un QR code) valable 5 minutes. Le téléphone reçoit **sa propre clé** (jamais la clé maître), révocable à tout moment. Pour un téléphone sur le réseau local : `HOST=0.0.0.0` + `OPENJARVIS_API_KEY`.
+- **Sauvegarde chiffrée** : export/import de vos données en un fichier AES-256-GCM protégé par une phrase secrète (les clés des appareils n'en font jamais partie).
+- **Briefing du matin réel** : météo en direct (si une clé météo est configurée), rappels, alertes et routines vocales ; plus aucune donnée inventée.
+- **Design** : palette « graphite + arc », typographie Instrument Sans / Instrument Serif pour la voix de l'assistant, mouvement réduit respecté, focus clavier visible.
+
+---
+
 ## 3. Sécurité & Confidentialité
 
-La sécurité a été auditée selon les critères les plus stricts :
+Modèle de sécurité du serveur (implémenté dans `src/server/security.ts`, testé dans `tests/server/`) :
 
-- **Zéro Clé Secrète en Dur** : Aucune clé API n'est présente dans le code source ou le dépôt Git. Toutes les clés transitent par les variables d'environnement serveur (`.env` / `GEMINI_API_KEY`) et ne sont jamais exposées au navigateur ou au client web.
-- **Stockage Chiffré** : Les données sensibles sont protégées par `AndroidX Security Crypto` et `MasterKeys` avec chiffrement AES-256 GCM.
-- **Garde-fous d'Action (Human-in-the-Loop)** : Toute opération destructive (suppression de fichiers, effacement de mémoire) exige une validation manuelle explicite de l'utilisateur.
-- **Sécurité Réseau** : Configuration stricte `network_security_config.xml` empêchant le trafic clair non sécurisé sur Android.
-- **Isolation Sandboxée** : Exécution des scripts et des commandes système avec limitation des boucles et audit trails.
+- **Authentification globale** : toutes les routes `/api/*` et `/v1/*` exigent la clé `OPENJARVIS_API_KEY` (`Authorization: Bearer <clé>` ou `X-API-Key`). Seules `/health`, `/api/auth/status` et `/api/android/verify-connection` sont publiques. Les requêtes venant **directement de la machine locale** (loopback, sans reverse proxy) sont acceptées sans clé pour le développement ; mettez `OPENJARVIS_REQUIRE_AUTH=true` pour l'interdire.
+- **CORS en liste blanche** : seules les origines locales (localhost, WebView Android/Capacitor/Tauri) et celles listées dans `ALLOWED_ORIGINS` sont acceptées. Plus aucune origine n'est « reflétée ».
+- **Protection DNS-rebinding** : le header `Host` des requêtes locales est vérifié (`ALLOWED_HOSTS` pour ajouter des noms).
+- **Exposition réseau minimale** : le serveur écoute par défaut sur `127.0.0.1`. Pour l'accès depuis un téléphone sur le réseau local, définissez `HOST=0.0.0.0` **et** une clé `OPENJARVIS_API_KEY` d'au moins 16 caractères (idéalement derrière HTTPS).
+- **Limites de débit** : 600 req/min par IP, 30 req/min sur les routes IA/voix/vision, 30 échecs d'authentification / 10 min, 10 échecs de code d'identité / 10 min.
+- **Taille des requêtes** : 2 Mo par défaut ; 35 Mo uniquement pour la vision, la transcription et le chat multimodal.
+- **Code d'identité (PIN / phrase)** : aucun code par défaut. Il est choisi par l'utilisateur (≥ 4 caractères), stocké **haché (scrypt + sel)** côté serveur, jamais renvoyé par l'API, comparé en temps constant, et nécessite l'ancien code pour être modifié.
+- **Aucune clé secrète dans le dépôt** : les clés passent par `.env` (voir `.env.example`) et ne sont jamais exposées au navigateur.
+- **Stockage Android chiffré** : `AndroidX Security Crypto` (AES-256 GCM), `allowBackup=false`, `network_security_config.xml` interdisant le trafic en clair, build release avec R8.
+- **Garde-fous d'action** : confirmation explicite pour les actions sensibles (jetons de confirmation, journal d'audit).
+
+> ⚠️ Cette liste décrit des protections *applicatives*. Aucun audit de sécurité externe n'a été réalisé : ne l'exposez pas sur Internet sans HTTPS ni revue indépendante. Voir `docs/SECURITY.md`.
 
 ---
 
@@ -186,6 +203,8 @@ apksigner sign --ks openjarvis-release-key.jks --out openjarvis-release-signed.a
 
 ## 7. Configuration & Clés API
 
+Dans l’application Android native, ouvrez *Paramètres → Clés d’API & Sécurité* pour configurer l’URL du serveur LAN et une clé maître ou un jeton d’appareil appairé. Le bouton *Vérifier la connexion au serveur* indique si l’hôte est joignable et, pour OpenJarvis, si le jeton est accepté. La clé est stockée dans le coffre chiffré Android et envoyée comme jeton Bearer aux requêtes de chat. Les serveurs Ollama/vLLM compatibles OpenAI sont également détectés, mais ne permettent pas toujours de vérifier la clé. Pour un appareil physique, utilisez HTTPS ; l’exception HTTP est limitée à quelques hôtes de développement.
+
 ### Variables d'Environnement
 Créez un fichier `.env` à la racine :
 
@@ -195,7 +214,36 @@ GEMINI_API_KEY=votre_cle_gemini_ici
 
 # URL personnalisée du serveur d'inférence (si déporté)
 VITE_API_URL=
+
+# Destination of the optional Expo WebView wrapper (App.expo.js).
+# Set it to your own OpenJarvis server; prefer HTTPS. Never put API keys here.
+EXPO_PUBLIC_APP_URL=https://openjarvis.example.com
+
+# --- Sécurité du serveur ---
+# Clé d'accès à l'API (>= 16 caractères). Obligatoire pour tout accès non local (Android, LAN).
+# Génération : openssl rand -hex 32
+OPENJARVIS_API_KEY=
+# Interface d'écoute (défaut 127.0.0.1) et port (défaut 3000)
+HOST=127.0.0.1
+PORT=3000
+# Origines web supplémentaires autorisées (CORS), séparées par des virgules
+ALLOWED_ORIGINS=
+# Noms d'hôte supplémentaires autorisés pour les requêtes locales (anti DNS-rebinding)
+ALLOWED_HOSTS=
+# true = exiger la clé même depuis la machine locale
+OPENJARVIS_REQUIRE_AUTH=false
+# Code d'identité initial optionnel (sinon défini dans l'écran de configuration)
+OPENJARVIS_SECURITY_CODE=
 ```
+
+L'adresse Expo n'est volontairement plus intégrée au code. Si `EXPO_PUBLIC_APP_URL`
+n'est pas définie ou n'est pas une URL HTTP(S), le wrapper affiche un écran de
+configuration et ne charge aucun serveur. Pour un serveur HTTP de développement,
+utilisez uniquement une adresse locale de confiance. La configuration réseau de
+`android/app/` concerne l'application native Kotlin ; elle ne s'applique pas
+automatiquement à une compilation Expo distincte.
+
+Côté interface web, renseignez la même clé dans *Paramètres* (ou `VITE_OPENJARVIS_API_KEY`) pour un accès distant.
 
 > 🔒 **Important** : Ne committez jamais de clé d'API dans votre dépôt. Déclarez uniquement les variables requises dans `.env.example`.
 
@@ -245,3 +293,4 @@ Ce projet est distribué sous licence **Apache 2.0**.
       url={https://arxiv.org/abs/2605.17172}, 
 }
 ```
+

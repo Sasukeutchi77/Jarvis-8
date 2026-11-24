@@ -114,7 +114,7 @@
         <service
             android:name=".services.JarvisAccessibilityService"
             android:exported="true"
-            android:label="JARVIS Core Accessibility & Screen Vision"
+            android:label="JARVIS Core Accessibility &amp; Screen Vision"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -209,3 +209,4 @@
     </application>
 
 </manifest>
+

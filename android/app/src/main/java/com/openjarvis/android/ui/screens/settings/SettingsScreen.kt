@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -34,16 +36,22 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openjarvis.android.JarvisApplication
 import com.openjarvis.android.config.ExecutionMode
+import com.openjarvis.android.core.engine.lan.OpenJarvisConnectionChecker
+import com.openjarvis.android.core.engine.lan.ServerConnectionResult
 import com.openjarvis.android.storage.SecureVault
 import com.openjarvis.android.ui.theme.JarvisAmber
 import com.openjarvis.android.ui.theme.JarvisCyan
@@ -54,6 +62,7 @@ import com.openjarvis.android.ui.theme.JarvisTextPrimary
 import com.openjarvis.android.ui.theme.JarvisTextSecondary
 import com.openjarvis.android.voice.diagnostics.VoiceDiagnosticReport
 import com.openjarvis.android.voice.diagnostics.VoiceDiagnostics
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen() {
@@ -61,15 +70,19 @@ fun SettingsScreen() {
     val configManager = JarvisApplication.instance.configManager
     val secureVault = JarvisApplication.instance.secureVault
     val config by configManager.config.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
 
     var wakeWordPhrase by remember { mutableStateOf(config.wakeWordPhrase) }
     var wakeWordSensitivity by remember { mutableStateOf(config.wakeWordSensitivity) }
     var wakeWordCooldownSec by remember { mutableStateOf(config.wakeWordCooldownSec) }
     var lanUrl by remember { mutableStateOf(config.lanServerUrl) }
+    var openJarvisApiKey by remember { mutableStateOf(secureVault.getSecret(SecureVault.KEY_OPENJARVIS)) }
     var geminiKey by remember { mutableStateOf(secureVault.getSecret(SecureVault.KEY_GEMINI)) }
     var openaiKey by remember { mutableStateOf(secureVault.getSecret(SecureVault.KEY_OPENAI)) }
     var deepgramKey by remember { mutableStateOf(secureVault.getSecret(SecureVault.KEY_DEEPGRAM)) }
     var savedSuccess by remember { mutableStateOf(false) }
+    var checkingServer by remember { mutableStateOf(false) }
+    var serverConnectionResult by remember { mutableStateOf<ServerConnectionResult?>(null) }
 
     var diagnosticReport by remember { mutableStateOf<VoiceDiagnosticReport?>(null) }
 
@@ -642,10 +655,16 @@ fun SettingsScreen() {
         item {
             OutlinedTextField(
                 value = lanUrl,
-                onValueChange = { lanUrl = it },
-                label = { Text("URL Serveur LAN (Ollama / vLLM)") },
+                onValueChange = {
+                    lanUrl = it
+                    serverConnectionResult = null
+                },
+                label = { Text("URL Serveur LAN (OpenJarvis / Ollama / vLLM)") },
+                placeholder = { Text("https://mon-serveur:3000") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = JarvisCyanLight,
                     unfocusedBorderColor = JarvisCyan.copy(alpha = 0.3f)
@@ -654,14 +673,105 @@ fun SettingsScreen() {
         }
 
         item {
+            Text(
+                text = "Pour un serveur sur un autre appareil du réseau local, privilégiez HTTPS. Le HTTP n’est autorisé que pour quelques hôtes de développement précis.",
+                color = JarvisTextSecondary,
+                fontSize = 11.sp
+            )
+        }
+
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    value = openJarvisApiKey,
+                    onValueChange = {
+                        openJarvisApiKey = it
+                        serverConnectionResult = null
+                    },
+                    label = { Text("Clé API ou jeton d’appareil OpenJarvis") },
+                    placeholder = { Text("Jeton (facultatif pour Ollama local)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = JarvisCyanLight,
+                        unfocusedBorderColor = JarvisCyan.copy(alpha = 0.3f)
+                    )
+                )
+                Text(
+                    text = "La clé est conservée dans le coffre chiffré Android et envoyée uniquement au serveur configuré.",
+                    color = JarvisTextSecondary,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+        }
+
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        checkingServer = true
+                        serverConnectionResult = null
+                        coroutineScope.launch {
+                            try {
+                                serverConnectionResult = OpenJarvisConnectionChecker.check(lanUrl, openJarvisApiKey)
+                            } finally {
+                                checkingServer = false
+                            }
+                        }
+                    },
+                    enabled = lanUrl.isNotBlank() && !checkingServer,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (checkingServer) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .padding(end = 2.dp),
+                            color = JarvisCyanLight,
+                            strokeWidth = 2.dp
+                        )
+                        Text("Vérification en cours…", color = JarvisTextPrimary)
+                    } else {
+                        Text("Vérifier la connexion au serveur", color = JarvisTextPrimary)
+                    }
+                }
+                serverConnectionResult?.let { result ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (result.connected) Icons.Filled.CheckCircle else Icons.Filled.Error,
+                            contentDescription = null,
+                            tint = if (result.connected) JarvisGreen else JarvisRed
+                        )
+                        Text(
+                            text = result.message,
+                            color = if (result.connected) JarvisGreen else JarvisRed,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
             Button(
                 onClick = {
                     secureVault.putSecret(SecureVault.KEY_GEMINI, geminiKey)
                     secureVault.putSecret(SecureVault.KEY_OPENAI, openaiKey)
                     secureVault.putSecret(SecureVault.KEY_DEEPGRAM, deepgramKey)
+                    secureVault.putSecret(SecureVault.KEY_OPENJARVIS, openJarvisApiKey.trim())
                     configManager.updateConfig(
                         config.copy(
-                            lanServerUrl = lanUrl,
+                            lanServerUrl = lanUrl.trim().trimEnd('/'),
                             wakeWordPhrase = wakeWordPhrase,
                             wakeWordSensitivity = wakeWordSensitivity,
                             wakeWordThreshold = 0.90f - wakeWordSensitivity * 0.30f,
@@ -689,3 +799,4 @@ fun SettingsScreen() {
         }
     }
 }
+

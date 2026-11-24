@@ -43,7 +43,7 @@ interface MemoryDao {
 
     @Query("""
         SELECT d.* FROM documents d
-        JOIN documents_fts fts ON d.id = fts.rowid
+        JOIN documents_fts fts ON d.id = fts.id
         WHERE documents_fts MATCH :searchQuery
         ORDER BY d.updatedAt DESC
         LIMIT :limit
@@ -53,3 +53,4 @@ interface MemoryDao {
     @Query("SELECT COUNT(*) FROM documents")
     fun getDocumentCountFlow(): Flow<Int>
 }
+

@@ -6,6 +6,7 @@ import com.openjarvis.android.core.engine.InferenceEngine
 import com.openjarvis.android.core.engine.ProviderType
 import com.openjarvis.android.core.engine.StreamChunk
 import com.openjarvis.android.logging.JarvisLogger
+import com.openjarvis.android.storage.SecureVault
 import com.openjarvis.android.storage.database.entity.DocumentEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -27,6 +28,7 @@ import java.util.concurrent.TimeUnit
  */
 class LanOpenJarvisEngine(
     private val configManager: ConfigManager,
+    private val secureVault: SecureVault,
     override val modelName: String = "qwen2.5:7b"
 ) : InferenceEngine {
 
@@ -38,16 +40,10 @@ class LanOpenJarvisEngine(
         .build()
 
     override suspend fun isAvailable(): Boolean {
-        val baseUrl = configManager.getLanServerUrl()
-        if (baseUrl.isBlank()) return false
-        return try {
-            val req = Request.Builder().url("$baseUrl/health").get().build()
-            client.newCall(req).execute().use { resp ->
-                resp.isSuccessful
-            }
-        } catch (e: Exception) {
-            false
-        }
+        return OpenJarvisConnectionChecker.check(
+            configManager.getLanServerUrl(),
+            secureVault.getSecret(SecureVault.KEY_OPENJARVIS)
+        ).connected
     }
 
     override fun generateStream(
@@ -99,6 +95,10 @@ class LanOpenJarvisEngine(
         val request = Request.Builder()
             .url(url)
             .post(body)
+            .apply {
+                val apiKey = secureVault.getSecret(SecureVault.KEY_OPENJARVIS).trim()
+                if (apiKey.isNotEmpty()) header("Authorization", "Bearer $apiKey")
+            }
             .build()
 
         try {
@@ -150,3 +150,4 @@ class LanOpenJarvisEngine(
         }
     }.flowOn(Dispatchers.IO)
 }
+
