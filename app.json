@@ -44,9 +44,7 @@
     "web": {
       "favicon": "./assets/OpenJarvis_Circular_Logo.png",
       "bundler": "metro"
-    },
-    "extra": {
-      "appUrl": "https://ais-pre-fpvigclxkpbuz4pnyohkts-294610358760.europe-west1.run.app"
     }
   }
 }
+

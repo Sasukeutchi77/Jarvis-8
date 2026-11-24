@@ -13,6 +13,7 @@ import {
   Activity,
   Maximize2,
   Minimize2,
+  Download,
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
@@ -31,6 +32,7 @@ export function ChatPage() {
 
   // App Store
   const messages = useAppStore((s) => s.messages);
+  const conversations = useAppStore((s) => s.conversations);
   const streamState = useAppStore((s) => s.streamState);
   const activeId = useAppStore((s) => s.activeId);
   const addMessage = useAppStore((s) => s.addMessage);
@@ -44,6 +46,56 @@ export function ChatPage() {
   const [voiceOverlayOpen, setVoiceOverlayOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const activeConversation = conversations.find((conversation) => conversation.id === activeId);
+
+  const exportConversation = () => {
+    if (messages.length === 0 || streamState.isStreaming) return;
+
+    const title = (activeConversation?.title || 'Conversation OpenJarvis').replace(/[\r\n]+/g, ' ').trim();
+    const lines = [
+      `# ${title}`,
+      '',
+      `- Exportée le : ${new Date().toLocaleString('fr-FR')}`,
+      ...(activeConversation?.model ? [`- Modèle : ${activeConversation.model}`] : []),
+      '',
+    ];
+
+    for (const message of messages) {
+      const author = message.role === 'user' ? 'Vous' : 'JARVIS';
+      lines.push(`## ${author}`, '', `_${new Date(message.timestamp).toLocaleString('fr-FR')}_`, '');
+      lines.push(message.content || '_(Message sans texte)_', '');
+
+      if (message.images?.length) {
+        lines.push(`_${message.images.length} image(s) jointe(s), non incluse(s) dans cet export._`, '');
+      }
+
+      if (message.researchSources?.length) {
+        lines.push('### Sources', '');
+        for (const source of message.researchSources) {
+          const label = source.title?.trim() || source.url || `Source ${source.ref}`;
+          lines.push(source.url ? `- [${label}](${source.url})` : `- ${label}`);
+        }
+        lines.push('');
+      }
+    }
+
+    const safeTitle = title
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'conversation-openjarvis';
+    const blob = new Blob([`${lines.join('\n')}\n`], { type: 'text/markdown;charset=utf-8' });
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `${safeTitle}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+    toast.success('Conversation exportée en Markdown');
+  };
 
   // Auto-scroll in chat mode
   useEffect(() => {
@@ -80,14 +132,28 @@ export function ChatPage() {
               </span>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setViewMode('hud')}
-              className="px-3 py-1 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 font-mono text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
-            >
-              <LayoutGrid className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Ouvrir le HUD Principal</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={exportConversation}
+                disabled={messages.length === 0 || streamState.isStreaming}
+                title={streamState.isStreaming
+                  ? 'Attendez la fin de la réponse pour exporter'
+                  : 'Exporter cette conversation en Markdown'}
+                className="px-3 py-1 rounded-xl bg-slate-800/70 hover:bg-slate-700 border border-slate-700 text-slate-300 font-mono text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Exporter</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('hud')}
+                className="px-3 py-1 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 font-mono text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+              >
+                <LayoutGrid className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Ouvrir le HUD Principal</span>
+              </button>
+            </div>
           </div>
 
           {/* Messages Stream */}
@@ -128,3 +194,4 @@ export function ChatPage() {
     </div>
   );
 }
+

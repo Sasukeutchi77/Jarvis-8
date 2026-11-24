@@ -3,7 +3,16 @@ import React, { useRef, useState } from 'react';
 import { StyleSheet, View, StatusBar, SafeAreaView, ActivityIndicator, Text, BackHandler } from 'react-native';
 import { WebView } from 'react-native-webview';
 
-const APP_URL = 'https://ais-pre-fpvigclxkpbuz4pnyohkts-294610358760.europe-west1.run.app';
+// The web server is deliberately supplied at build time. This prevents a
+// packaged client from silently sending conversations to a third-party host.
+const APP_URL = (process.env.EXPO_PUBLIC_APP_URL || '').trim();
+const isValidAppUrl = (() => {
+  try {
+    return ['http:', 'https:'].includes(new URL(APP_URL).protocol);
+  } catch {
+    return false;
+  }
+})();
 
 export default function App() {
   const webViewRef = useRef(null);
@@ -22,6 +31,20 @@ export default function App() {
     const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
     return () => subscription.remove();
   }, [canGoBack]);
+
+  if (!isValidAppUrl) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#020617" />
+        <View style={styles.setupContainer}>
+          <Text style={styles.setupTitle}>Serveur OpenJarvis non configuré</Text>
+          <Text style={styles.setupText}>
+            Définissez EXPO_PUBLIC_APP_URL avec l’adresse HTTPS de votre serveur, puis reconstruisez l’application.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -75,4 +98,21 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.5,
   },
+  setupContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 28,
+  },
+  setupTitle: {
+    color: '#f8fafc',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  setupText: {
+    color: '#cbd5e1',
+    fontSize: 15,
+    lineHeight: 22,
+  },
 });
+

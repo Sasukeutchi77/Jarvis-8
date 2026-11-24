@@ -1,0 +1,53 @@
+name: CI (Android)
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'android/**'
+      - '.github/workflows/ci-android.yml'
+  pull_request:
+    branches: ['**']
+    paths:
+      - 'android/**'
+      - '.github/workflows/ci-android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # No Gradle wrapper is committed, so a pinned Gradle is provisioned here.
+      # (Run `gradle wrapper` in android/ and commit it to switch to ./gradlew.)
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Unit tests
+        run: gradle testDebugUnitTest --no-daemon
+
+      - name: Lint
+        run: gradle lintDebug --no-daemon
+        continue-on-error: true
+
+      - name: Assemble release (checks R8 / ProGuard rules)
+        run: gradle assembleRelease --no-daemon
+
