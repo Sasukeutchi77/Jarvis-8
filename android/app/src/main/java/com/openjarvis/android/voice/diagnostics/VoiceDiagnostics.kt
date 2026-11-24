@@ -134,7 +134,7 @@ object VoiceDiagnostics {
         var ttsOk = false
         var ttsDetails = "Test TTS"
         try {
-            val tts = TextToSpeech(context) null
+            val tts = TextToSpeech(context, null)
             ttsOk = true
             ttsDetails = "Moteur TextToSpeech initialisé (Locale: ${Locale.getDefault().displayName})."
             tts.shutdown()
@@ -214,3 +214,4 @@ object VoiceDiagnostics {
         )
     }
 }
+
