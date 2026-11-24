@@ -2,12 +2,12 @@ name: CI (Android)
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
     paths:
       - 'android/**'
       - '.github/workflows/ci-android.yml'
   pull_request:
-    branches: ['**']
+    branches: [main]
     paths:
       - 'android/**'
       - '.github/workflows/ci-android.yml'
@@ -50,4 +50,12 @@ jobs:
 
       - name: Assemble release (checks R8 / ProGuard rules)
         run: gradle assembleRelease --no-daemon
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jarvis-8-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
 
