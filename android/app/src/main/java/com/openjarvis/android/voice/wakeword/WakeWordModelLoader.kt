@@ -11,7 +11,7 @@ import java.io.InputStreamReader
 /**
  * Real Acoustic Model & Template Loader for JARVIS Wake-Word Engine.
  * Loads and parses acoustic profile models from:
- * 1. Android Assets directory (`assets/models/wakeword/*.json`) -> MODEL_LOADED_ASSET
+ * 1. Android Assets directory (wake-word JSON files) -> MODEL_LOADED_ASSET
  * 2. User-trained personalized templates in internal app storage -> MODEL_LOADED_USER_TEMPLATES
  * 3. Compiled baseline acoustic templates as transparent fallback -> MODEL_LOADED_COMPILED_TEMPLATE
  *
